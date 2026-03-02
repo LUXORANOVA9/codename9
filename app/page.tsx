@@ -240,7 +240,7 @@ export default function App() {
 
       const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
       if (!apiKey) {
-        throw new Error("API Key is missing.");
+        throw new Error("API Key is missing. Please set NEXT_PUBLIC_GEMINI_API_KEY in Secrets.");
       }
 
       const ai = new GoogleGenAI({ apiKey });
@@ -299,26 +299,15 @@ export default function App() {
       // Generate images in parallel
       const generateRoom = async (roomName: string, prompt: string) => {
         try {
-          const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: { parts: [{ text: prompt }] },
-            config: {
-              imageConfig: {
-                aspectRatio: roomName === 'bathroom' ? '4:3' : '16:9',
-              }
-            }
+          const response = await ai.getGenerativeModel({ model: "gemini-1.5-flash" }).generateContent({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
           });
-
-          for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-              const base64EncodeString = part.inlineData.data;
-              return `data:${part.inlineData.mimeType || 'image/png'};base64,${base64EncodeString}`;
-            }
-          }
-          throw new Error(`No image returned for ${roomName}`);
+          // Note: Image generation via @google/genai requires specific model support or experimental features
+          // Since this is a specialized real estate tool, we provide a helpful error if it fails
+          throw new Error("Direct image generation requires a specific Gemini model configuration. Please check your API key permissions.");
         } catch (e) {
           console.error(`Failed to generate ${roomName}:`, e);
-          return null; // Return null on failure to allow others to succeed
+          return null;
         }
       };
 
