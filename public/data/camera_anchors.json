@@ -1,0 +1,23 @@
+[
+  {
+    "id": "living_room_main",
+    "name": "Living Room",
+    "position": [0, 1.5, 5],
+    "target": [0, 1, 0],
+    "fov": 45
+  },
+  {
+    "id": "kitchen_view",
+    "name": "Kitchen",
+    "position": [3, 1.5, 2],
+    "target": [3, 1, -2],
+    "fov": 50
+  },
+  {
+    "id": "master_bedroom",
+    "name": "Master Bedroom",
+    "position": [-3, 1.5, -2],
+    "target": [-3, 1, -5],
+    "fov": 45
+  }
+]

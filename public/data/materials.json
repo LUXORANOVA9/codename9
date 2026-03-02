@@ -1,0 +1,23 @@
+{
+  "default": {
+    "id": "default",
+    "name": "Default White",
+    "color": "#ffffff",
+    "roughness": 0.5,
+    "metalness": 0
+  },
+  "floor_wood": {
+    "id": "floor_wood",
+    "name": "Oak Flooring",
+    "color": "#8B4513",
+    "roughness": 0.8,
+    "metalness": 0.1
+  },
+  "wall_paint": {
+    "id": "wall_paint",
+    "name": "Matte Grey",
+    "color": "#e0e0e0",
+    "roughness": 0.9,
+    "metalness": 0
+  }
+}
