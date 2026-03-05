@@ -1,4 +1,4 @@
-import { GoogleGenAI, SchemaType } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 export interface StructuredPrompt {
   unit_id: string;
@@ -23,32 +23,10 @@ export async function normalizeUserPrompt(
 ): Promise<StructuredPrompt> {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("Missing Gemini API Key. Please set NEXT_PUBLIC_GEMINI_API_KEY in Secrets.");
+    throw new Error("Missing Gemini API Key");
   }
 
-  const ai = new GoogleGenAI(apiKey);
-  const model = ai.getGenerativeModel({
-    model: "gemini-1.5-flash",
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: SchemaType.OBJECT,
-        properties: {
-          unit_id: { type: SchemaType.STRING },
-          room: { type: SchemaType.STRING },
-          facing: { type: SchemaType.STRING },
-          style: { type: SchemaType.STRING },
-          materials: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-          furniture_density: { type: SchemaType.STRING },
-          budget_tier: { type: SchemaType.STRING },
-          constraints: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
-          camera: { type: SchemaType.STRING },
-          deliverables: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } }
-        },
-        required: ["unit_id", "room", "facing", "style", "materials", "furniture_density", "budget_tier", "constraints", "camera", "deliverables"]
-      }
-    }
-  });
+  const ai = new GoogleGenAI({ apiKey });
 
   const systemInstruction = `
     You are an AI interior design prompt normalizer.
@@ -65,11 +43,34 @@ export async function normalizeUserPrompt(
     Ensure the output strictly adheres to the JSON schema.
   `;
 
-  const result = await model.generateContent(`${systemInstruction}\n\nRaw user input: "${rawInput}"`);
-  const text = result.response.text();
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Raw user input: "${rawInput}"`,
+    config: {
+      systemInstruction,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          unit_id: { type: Type.STRING, description: "The unit identifier (e.g., 2BHK_DELUXE_02)" },
+          room: { type: Type.STRING, description: "The specific room (e.g., Living Room, Master Bedroom)" },
+          facing: { type: Type.STRING, description: "Lighting condition/facing (e.g., west-evening, east-morning)" },
+          style: { type: Type.STRING, description: "The interior style (e.g., modern-warm, japandi, minimal-luxe)" },
+          materials: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of materials (e.g., natural_oak, brushed_brass)" },
+          furniture_density: { type: Type.STRING, description: "low, medium, or high" },
+          budget_tier: { type: Type.STRING, description: "standard, premium, or signature" },
+          constraints: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of structural constraints (e.g., lock_walls, clear_0.9m_circulation)" },
+          camera: { type: Type.STRING, description: "Camera anchor ID (e.g., LR_CAM_01)" },
+          deliverables: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of deliverables (e.g., render_4096, albedo, roughness, equirect360)" }
+        },
+        required: ["unit_id", "room", "facing", "style", "materials", "furniture_density", "budget_tier", "constraints", "camera", "deliverables"]
+      }
+    }
+  });
 
   try {
-    return JSON.parse(text) as StructuredPrompt;
+    const jsonStr = response.text || "{}";
+    return JSON.parse(jsonStr) as StructuredPrompt;
   } catch (error) {
     console.error("Failed to parse structured prompt:", error);
     throw new Error("Failed to normalize prompt");

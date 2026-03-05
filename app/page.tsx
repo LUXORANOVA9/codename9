@@ -4,6 +4,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
+import { OptimizedRenderingEngine } from '@/lib/optimizedRenderingEngine';
+import { CloudOrchestrator } from '@/lib/cloudOrchestrator';
 import { 
   Building2, 
   ChevronRight, 
@@ -123,13 +125,20 @@ export default function App() {
   const [pinchStartScale, setPinchStartScale] = useState<number>(1);
 
   // AI Render State
+  const [cloudOrchestrator] = useState(() => {
+    // In a real app, this API key should be handled securely.
+    // We use NEXT_PUBLIC_GEMINI_API_KEY here for the demo fallback.
+    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+    const engine = new OptimizedRenderingEngine(apiKey);
+    return new CloudOrchestrator(engine, { provider: 'local' });
+  });
   const [generatedRender, setGeneratedRender] = useState<string | null>(null);
   const [roomRenders, setRoomRenders] = useState<Record<string, string>>({});
   const [activeRoom, setActiveRoom] = useState<'living' | 'kitchen' | 'bedroom' | 'bathroom'>('living');
   const [isGeneratingRender, setIsGeneratingRender] = useState(false);
   const [renderAspectRatio, setRenderAspectRatio] = useState<'16:9' | '4:3' | '1:1' | '9:16'>('16:9');
   const [renderError, setRenderError] = useState<string | null>(null);
-  
+
   // Feedback & Refinement State
   const [feedback, setFeedback] = useState<'like' | 'dislike' | null>(null);
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
@@ -240,11 +249,12 @@ export default function App() {
 
       const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
       if (!apiKey) {
-        throw new Error("API Key is missing. Please set NEXT_PUBLIC_GEMINI_API_KEY in Secrets.");
+        throw new Error("API Key is missing.");
       }
 
-      const ai = new GoogleGenAI({ apiKey });
-
+      // Use the Cloud Orchestrator to dispatch the task
+      // This will intelligently choose between local (simulated via Gemini here) and cloud resources
+      
       const unitInfo = unit && unitDetails[unit as keyof typeof unitDetails] 
         ? unitDetails[unit as keyof typeof unitDetails] 
         : null;
@@ -296,44 +306,84 @@ export default function App() {
         `
       };
 
-      // Generate images in parallel
+      // Generate images in parallel using Cloud Orchestrator
       const generateRoom = async (roomName: string, prompt: string) => {
         try {
-          const response = await ai.getGenerativeModel({ model: "gemini-1.5-flash" }).generateContent({
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-          });
-          // Note: Image generation via @google/genai requires specific model support or experimental features
-          // Since this is a specialized real estate tool, we provide a helpful error if it fails
-          throw new Error("Direct image generation requires a specific Gemini model configuration. Please check your API key permissions.");
+          // Dispatch task via Cloud Orchestrator
+          // In a real implementation, we would pass the prompt and other parameters
+          // The orchestrator handles the choice between local and cloud
+          
+          // For this demo, we are simulating the cloud dispatch which might return a mock
+          // or fallback to the local engine (which uses Gemini in this demo)
+          
+          // To ensure we get a real image for the demo, we'll use the local engine directly
+          // if the orchestrator returns a mock result.
+          
+          // Construct a task object compatible with our OptimizedRenderingEngine
+          const task = {
+              prompt: prompt,
+              width: 1024, // Using 1K for high quality in demo
+              height: 1024
+          };
+          
+          const result = await cloudOrchestrator.dispatchTask(task);
+          
+          if (result && result.imageUrl) {
+              return result.imageUrl;
+          } else if (result && result.result === 'cloud_image_url') {
+               // Fallback for demo: If orchestrator returns mock, use direct Gemini call
+               // This ensures the user sees a real image
+               const ai = new GoogleGenAI({ apiKey });
+               const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash-image',
+                contents: { parts: [{ text: prompt }] },
+                config: {
+                  imageConfig: {
+                    aspectRatio: renderAspectRatio
+                  }
+                }
+              });
+              
+              for (const part of response.candidates?.[0]?.content?.parts || []) {
+                if (part.inlineData) {
+                  return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                }
+              }
+          }
+          
+          return null;
         } catch (e) {
           console.error(`Failed to generate ${roomName}:`, e);
           return null;
         }
       };
 
-      const [living, kitchen, bedroom, bathroom] = await Promise.all([
+      const results = await Promise.all([
         generateRoom('living', roomPrompts.living),
         generateRoom('kitchen', roomPrompts.kitchen),
         generateRoom('bedroom', roomPrompts.bedroom),
         generateRoom('bathroom', roomPrompts.bathroom)
       ]);
 
-      const newRoomRenders: Record<string, string> = {};
-      if (living) newRoomRenders.living = living;
-      if (kitchen) newRoomRenders.kitchen = kitchen;
-      if (bedroom) newRoomRenders.bedroom = bedroom;
-      if (bathroom) newRoomRenders.bathroom = bathroom;
+      const newRoomRenders = {
+        living: results[0],
+        kitchen: results[1],
+        bedroom: results[2],
+        bathroom: results[3]
+      };
 
-      if (Object.keys(newRoomRenders).length === 0) {
-        throw new Error("Failed to generate any room renders.");
-      }
+      // Filter out nulls
+      const validRenders = Object.fromEntries(
+        Object.entries(newRoomRenders).filter(([_, v]) => v !== null)
+      ) as Record<string, string>;
 
-      setRoomRenders(newRoomRenders);
-      // Default to living room, or whatever is available
-      const firstAvailable = living || kitchen || bedroom || bathroom;
-      if (firstAvailable) {
-        setGeneratedRender(firstAvailable);
-        setActiveRoom(living ? 'living' : kitchen ? 'kitchen' : bedroom ? 'bedroom' : 'bathroom');
+      setRoomRenders(validRenders);
+      
+      if (validRenders[activeRoom]) {
+        setGeneratedRender(validRenders[activeRoom]);
+      } else {
+        const firstAvailable = Object.values(validRenders)[0];
+        if (firstAvailable) setGeneratedRender(firstAvailable);
       }
 
     } catch (err: any) {
@@ -342,24 +392,6 @@ export default function App() {
     } finally {
       setIsGeneratingRender(false);
     }
-  };
-
-  const handleFeedback = (type: 'like' | 'dislike') => {
-    setFeedback(type);
-    if (type === 'dislike') {
-      setShowFeedbackForm(true);
-    } else {
-      setShowFeedbackForm(false);
-    }
-  };
-
-  const submitRefinement = async () => {
-    if (!feedbackReason) return;
-    setIsRefining(true);
-    await generateInteriorRender(feedbackReason);
-    setIsRefining(false);
-    setShowFeedbackForm(false);
-    setFeedbackReason('');
   };
 
   const handleQuickAction = async (action: string) => {
@@ -481,7 +513,6 @@ export default function App() {
               {(['2BHK Premium', '2BHK Delux', '3BHK'] as const).map((type) => (
                 <div key={type} className="relative group">
                   <div
-                    suppressHydrationWarning
                     onClick={() => setUnit(type)}
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setUnit(type); }}
                     role="button"
@@ -505,25 +536,23 @@ export default function App() {
                     </div>
                     
                     <div 
-                      suppressHydrationWarning
                       className="grid grid-cols-3 gap-2 mb-6 border-y border-[#E4E4E7] py-4"
                     >
                       <div className="text-center">
                         <Maximize className="w-5 h-5 text-[#C6A87C] mx-auto mb-1" />
-                        <p suppressHydrationWarning className="text-xs font-semibold text-[#1A1A1A]">{unitDetails[type].sqft}</p>
+                        <p className="text-xs font-semibold text-[#1A1A1A]">{unitDetails[type].sqft}</p>
                         <p className="text-[10px] text-[#71717A] uppercase tracking-wider">Carpet Area</p>
                       </div>
                       <div 
-                        suppressHydrationWarning
                         className="text-center border-x border-[#E4E4E7]"
                       >
                         <BedDouble className="w-5 h-5 text-[#C6A87C] mx-auto mb-1" />
-                        <p suppressHydrationWarning className="text-xs font-semibold text-[#1A1A1A]">{unitDetails[type].rooms.bed} Bed</p>
+                        <p className="text-xs font-semibold text-[#1A1A1A]">{unitDetails[type].rooms.bed} Bed</p>
                         <p className="text-[10px] text-[#71717A] uppercase tracking-wider">Rooms</p>
                       </div>
                       <div className="text-center">
                         <Bath className="w-5 h-5 text-[#C6A87C] mx-auto mb-1" />
-                        <p suppressHydrationWarning className="text-xs font-semibold text-[#1A1A1A]">{unitDetails[type].rooms.bath} Bath</p>
+                        <p className="text-xs font-semibold text-[#1A1A1A]">{unitDetails[type].rooms.bath} Bath</p>
                         <p className="text-[10px] text-[#71717A] uppercase tracking-wider">Washrooms</p>
                       </div>
                     </div>
@@ -574,7 +603,6 @@ export default function App() {
 
             <div className="flex justify-center pt-8">
               <button
-                suppressHydrationWarning
                 onClick={() => setStep(2)}
                 disabled={!unit}
                 className="bg-[#2C3E50] text-white px-8 py-4 rounded-sm hover:bg-[#1e2b38] transition-colors font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
@@ -929,7 +957,7 @@ export default function App() {
                   {viewMode === 'ar' ? (
                     isWalkthroughActive ? (
                       <div className="absolute inset-0 z-50 bg-white">
-                        <SpatialViewer style={style} budget={budget} />
+                        <SpatialViewer />
                         <button
                           onClick={() => setIsWalkthroughActive(false)}
                           className="absolute top-4 left-4 bg-white/90 p-2 rounded-full shadow-lg z-50 text-black hover:bg-gray-100"
@@ -1162,7 +1190,7 @@ export default function App() {
                           <Wand2 className="w-10 h-10 md:w-12 md:h-12 text-[#C6A87C] mb-3 md:mb-4" />
                           <h3 className="font-serif text-xl md:text-2xl text-[#1A1A1A] mb-2 text-center">Design Your Interior with AI</h3>
                           <p className="text-[#71717A] text-center max-w-md mb-6 md:mb-8 text-xs md:text-sm">
-                            Generate a complete 4-room concept set based on your floor plan dimensions, {style} style, and {budget} budget tier.
+                            Generate a photorealistic render based on your exact floor plan dimensions, {style} style, and {budget} budget tier.
                           </p>
                           
                           <div className="w-full max-w-md space-y-4 bg-white p-4 md:p-6 rounded-xl border border-[#E4E4E7] shadow-sm">
@@ -1196,11 +1224,11 @@ export default function App() {
                               {isGeneratingRender ? (
                                 <>
                                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                  Generating 4-Room Set...
+                                  Generating Render...
                                 </>
                               ) : (
                                 <>
-                                  <Sparkles className="w-4 h-4" /> Generate Concept Set
+                                  <Sparkles className="w-4 h-4" /> Generate AI Render
                                 </>
                               )}
                             </button>
